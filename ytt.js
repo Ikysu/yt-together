@@ -109,31 +109,136 @@ fastify.ready(err => {
     fastify.io.on('connect', (socket) => {
         console.info('Socket connected!', socket.id);
 
+        function checkRoom() {
+            let roomId = [...socket.rooms][1];
+            if(roomId){
+                if(rooms[roomId]){
+                    return roomId
+                }else{
+                    socket.emit("error", {message:"Room not found"})
+                    return false
+                }
+            }else{
+                socket.emit("error", {message:"Not connected"})
+                return false
+            }
+        }
+
+
+        // Пользователь
+        socket.on("user-set-name", ({username})=>{
+            let roomId = checkRoom();
+            if(roomId){
+                rooms[roomId].users.forEach((obj, index)=>{
+                    if(obj.id==socket.id) rooms[roomId].users[index].username=username;
+                })
+                fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
+            }
+        })
+
+
+
+
+
+
+        // Плейлист
+        socket.on("playlist-add", async ({videoId})=>{
+            let roomId = checkRoom();
+            if(roomId){
+                let res = await getVideo(videoId);
+                if(res.error){
+                    socket.emit("error", {message:res.error})
+                }else{
+                    rooms[roomId].playlist.push(res)
+                    fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
+                }
+            }
+        })
+
+        socket.on("playlist-remove", async ({index})=>{
+            let roomId = checkRoom();
+            if(roomId){
+                if(rooms[roomId].playlist.length>index){
+                    rooms[roomId].playlist.splice(index, 1);
+                    fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
+                }else{
+                    socket.emit("error", {message:"ID выходит за границы"})
+                }
+            }
+        })
+
+        socket.on("playlist-set", async ({index})=>{
+            let roomId = checkRoom();
+            if(roomId){
+                if(rooms[roomId].playlist.length>index){
+                    rooms[roomId].now={
+                        index,
+                        meta:null
+                    };
+                    fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
+                }else{
+                    socket.emit("error", {message:"ID выходит за границы"})
+                }
+            }
+        })
+
+
+
+
+
+
+        // Синхронизация
+        socket.on("video-sync", async data=>{
+            let roomId = checkRoom();
+            if(roomId){
+                rooms[roomId].now.meta=data
+                fastify.io.sockets.to(roomId).emit("video-sync", {id:socket.id, ...data})
+            }
+        })
+
+
+
+
+
+        // Чат
+        socket.on("room-message", ({text})=>{
+            let roomId = checkRoom();
+            if(roomId){
+                if(text.length>200){
+                    socket.emit("error", {message:"Не спамь мудила"})
+                }else{
+                    console.log("room-incoming", {id:socket.id, text})
+                    fastify.io.sockets.to(roomId).emit("room-incoming", {id:socket.id, text})
+                }
+            }
+        })
+
+
+
+
+
+
+
+
+
+
+
+        // Комната
         socket.on("room-join", ({roomId, username})=>{
             console.log("room-join", socket.id, {roomId, username})
             if(rooms[roomId]){
                 rooms[roomId].users.forEach((obj, index)=>{
                     if(obj.id==socket.id||obj.username==username) {
                         rooms[roomId].users.splice(index, 1);
-                        if(fastify.io.sockets.sockets.has(obj.id)){
-                            fastify.io.sockets.sockets.get(obj.id).disconnect()
-                        }
+                        if(fastify.io.sockets.sockets.has(obj.id)) fastify.io.sockets.sockets.get(obj.id).disconnect()
                     }
                 })
                 if(rooms[roomId].users.map(({username})=>username).indexOf(username)==-1){
-                    if(rooms[roomId].users.length){
-                        rooms[roomId].users.push({
-                            id:socket.id,
-                            username:username?username:"User",
-                            perms:0
-                        })
-                    }else{
-                        rooms[roomId].users.push({
-                            id:socket.id,
-                            username:username?username:"Admin",
-                            perms:perms.length-1
-                        })
-                    }
+                    rooms[roomId].users.push({
+                        id:socket.id,
+                        username:username?username:"User",
+                        perms:rooms[roomId].users.length ? 0 : perms.length-1
+                    })
                     socket.join(roomId)
                     if(rooms[roomId].now.meta) setTimeout(()=>{
                         socket.emit("video-sync", {id:"", ...rooms[roomId].now.meta})
@@ -147,103 +252,24 @@ fastify.ready(err => {
             }
         })
 
-        socket.on("room-message", ({text})=>{
-            let roomId = [...socket.rooms][1];
-            if(roomId){
-                if(rooms[roomId]){
-                    if(text.length>200){
-                        socket.emit("error", {message:"Не спамь мудила"})
-                    }else{
-                        console.log("room-incoming", {id:socket.id, text})
-                        fastify.io.sockets.to(roomId).emit("room-incoming", {id:socket.id, text})
-                    }
-                    
-                }else{
-                    socket.emit("error", {message:"Room not found"})
-                }
-            }else{
-                socket.emit("error", {message:"Not connected"})
-            }
-        })
-
-        socket.on("user-set-name", ({username})=>{
-            let roomId = [...socket.rooms][1];
-            if(roomId){
-                if(rooms[roomId]){
-                    rooms[roomId].users.forEach((obj, index)=>{
-                        if(obj.id==socket.id) rooms[roomId].users[index].username=username;
-                    })
-                    fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
-                }else{
-                    socket.emit("error", {message:"Room not found"})
-                }
-            }else{
-                socket.emit("error", {message:"Not connected"})
-            }
-        })
-
-        socket.on("playlist-add", async ({videoId})=>{
-            let roomId = [...socket.rooms][1];
-            if(roomId){
-                if(rooms[roomId]){
-                    let res = await getVideo(videoId);
-                    if(res.error){
-                        socket.emit("error", {message:res.error})
-                    }else{
-                        rooms[roomId].playlist.push(res)
-                        fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
-                    }
-                }else{
-                    socket.emit("error", {message:"Room not found"})
-                }
-            }else{
-                socket.emit("error", {message:"Not connected"})
-            }
-        })
-
-        socket.on("video-sync", async data=>{
-            let roomId = [...socket.rooms][1];
-            if(roomId){
-                if(rooms[roomId]){
-                    rooms[roomId].now.meta=data
-                    fastify.io.sockets.to(roomId).emit("video-sync", {id:socket.id, ...data})
-                }else{
-                    socket.emit("error", {message:"Room not found"})
-                }
-            }else{
-                socket.emit("error", {message:"Not connected"})
-            }
-        })
-
         function roomLeave() {
-            let roomId = [...socket.rooms][1];
+            let roomId = checkRoom();
             if(roomId){
-                if(rooms[roomId]){
-                    rooms[roomId].users.forEach((obj, index)=>{
-                        if(obj.id==socket.id) rooms[roomId].users.splice(index, 1);
-                    })
-                    if(rooms[roomId].users.length==0) {
-                        delete rooms[roomId];
-                    }else{
-                        rooms[roomId].users[0].perms=perms.length-1
-                    }
-                    socket.leave(roomId)
-                    fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
+                rooms[roomId].users.forEach((obj, index)=>{
+                    if(obj.id==socket.id) rooms[roomId].users.splice(index, 1);
+                })
+                if(rooms[roomId].users.length==0) {
+                    delete rooms[roomId];
                 }else{
-                    socket.emit("error", {message:"Room not found"})
+                    rooms[roomId].users[0].perms=perms.length-1
                 }
-            }else{
-                socket.emit("error", {message:"Not connected"})
+                socket.leave(roomId)
+                fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
             }
         }
 
-        socket.on("room-leave", ()=>{
-            roomLeave()
-        })
-
-        socket.on("disconnect",()=>{
-            roomLeave()
-        })
+        socket.on("room-leave", roomLeave)
+        socket.on("disconnect", roomLeave)
     })
 });
 
