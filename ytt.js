@@ -109,30 +109,40 @@ fastify.get("/room/create", (req, reply)=>{
     reply.send(rooms[roomId])
 })
 
-let cacheTrend = [];
+let cacheTrend = {
+    data:[],
+    time:0
+};
 
 fastify.get("/trending", async (req, reply)=>{
-    let res = await fetch("https://www.youtube.com/feed/trending");
-    if(res.ok){
-        let body = await res.text()
-        let parse = body.toString().match(/ytInitialData.+{.+;<\/script>/gm);
-        if(parse){
-            let j = JSON.parse(parse[0].slice(16,parse[0].length-10));
-            let rec = j?.contents?.twoColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents?.[0]?.shelfRenderer?.content?.expandedShelfContentsRenderer?.items?.map(vid=>{
-                return {
-                    id:vid?.videoRenderer?.videoId,
-                    title:vid?.videoRenderer?.title?.runs?.[0]?.text,
-                    thumbnail:vid?.videoRenderer?.thumbnail?.thumbnails?.length ? vid?.videoRenderer?.thumbnail?.thumbnails[vid?.videoRenderer?.thumbnail?.thumbnails?.length-1]?.url : null,
-                    duration:formatTime(vid?.videoRenderer?.lengthText?.simpleText),
-                    channel:{
-                        name:vid?.videoRenderer?.ownerText?.runs?.[0]?.text,
-                        url:vid?.videoRenderer?.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url
+    if((+new Date())-cacheTrend.time>60*60*1000){
+        let res = await fetch("https://www.youtube.com/feed/trending");
+        if(res.ok){
+            let body = await res.text()
+            let parse = body.toString().match(/ytInitialData.+{.+;<\/script>/gm);
+            if(parse){
+                let j = JSON.parse(parse[0].slice(16,parse[0].length-10));
+                let rec = j?.contents?.twoColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents?.[0]?.shelfRenderer?.content?.expandedShelfContentsRenderer?.items?.map(vid=>{
+                    return {
+                        id:vid?.videoRenderer?.videoId,
+                        title:vid?.videoRenderer?.title?.runs?.[0]?.text,
+                        thumbnail:vid?.videoRenderer?.thumbnail?.thumbnails?.length ? vid?.videoRenderer?.thumbnail?.thumbnails[vid?.videoRenderer?.thumbnail?.thumbnails?.length-1]?.url : null,
+                        duration:formatTime(vid?.videoRenderer?.lengthText?.simpleText),
+                        channel:{
+                            name:vid?.videoRenderer?.ownerText?.runs?.[0]?.text,
+                            url:vid?.videoRenderer?.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url
+                        }
                     }
+                })
+                if(rec){
+                    cacheTrend={
+                        data:rec,
+                        time:+new Date()
+                    };
                 }
-            })
-            if(rec){
-                cacheTrend=rec;
+                reply.send(cacheTrend)
             }
+        }else{
             reply.send(cacheTrend)
         }
     }else{
