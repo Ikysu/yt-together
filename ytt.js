@@ -121,8 +121,8 @@ fastify.get("/trending", async (req, reply)=>{
             let rec = j?.contents?.twoColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents?.[0]?.shelfRenderer?.content?.expandedShelfContentsRenderer?.items?.map(vid=>{
                 return {
                     id:vid?.videoRenderer?.videoId,
-                    title:vid?.videoRenderer?.title?.accessibility?.accessibilityData?.label,
-                    thumbnail:vid?.videoRenderer?.thumbnail?.thumbnails?.length ? vid?.videoRenderer?.thumbnail?.thumbnails[vid?.videoRenderer?.thumbnail?.thumbnails?.length-1] : null,
+                    title:vid?.videoRenderer?.title?.runs?.[0]?.text,
+                    thumbnail:vid?.videoRenderer?.thumbnail?.thumbnails?.length ? vid?.videoRenderer?.thumbnail?.thumbnails[vid?.videoRenderer?.thumbnail?.thumbnails?.length-1]?.url : null,
                     duration:formatTime(vid?.videoRenderer?.lengthText?.simpleText),
                     channel:{
                         name:vid?.videoRenderer?.ownerText?.runs?.[0]?.text,
