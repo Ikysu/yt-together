@@ -5,7 +5,17 @@ import {nanoid} from 'nanoid';
 import md5 from 'md5';
 import youtubedl from 'youtube-dl-exec';
 import fs from 'fs';
+import fetch from 'node-fetch'
 
+function formatTime(time) {
+    if(!time) return 0;
+    let spl = time.split(":"),
+        sum = 0;
+    for(let i=spl.length-1;i>=0;i--){
+        sum+=spl[i]*Math.pow(60, i)
+    }
+    return sum
+}
 
 function getVideo(id) {
     return new Promise((resolve, reject)=>{
@@ -18,14 +28,14 @@ function getVideo(id) {
                 'referer:youtube.com',
                 'user-agent:googlebot'
             ]
-        }).then(({id, title, formats, thumbnail})=>{
+        }).then(({id, title, formats, thumbnail, channel, channel_url, duration})=>{
             let frms = []
             formats.forEach(({vcodec, acodec, width, height, url})=>{
                 if(vcodec!="none"&&acodec!="none"){
                     frms.push({width, height, url})
                 }
             })
-            resolve({id, title, thumbnail, formats:frms })
+            resolve({id, title, thumbnail, formats:frms, channel:{name:channel, url:channel_url}, duration })
         }).catch((error)=>{
             console.log(Object.keys(error))
             resolve({error:"Video unavailable"})
@@ -85,10 +95,6 @@ function getToken() {
     }
 }
 
-fastify.get("/perms", (req, reply)=>{
-    reply.send(perms)
-})
-
 fastify.get("/room/create", (req, reply)=>{
     let roomId = getToken();
     rooms[roomId]={
@@ -101,6 +107,35 @@ fastify.get("/room/create", (req, reply)=>{
         playlist:[]
     };
     reply.send(rooms[roomId])
+})
+
+let cacheTrend = [];
+
+fastify.get("/trending", async (req, reply)=>{
+    let res = await fetch("https://www.youtube.com/feed/trending");
+    if(res.ok){
+        let body = await res.text()
+        let parse = body.toString().match(/ytInitialData.+{.+;<\/script>/gm);
+        if(parse){
+            let j = JSON.parse(parse[0].slice(16,parse[0].length-10));
+            let rec = j?.contents?.twoColumnBrowseResultsRenderer?.tabs?.[2]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.shelfRenderer?.content?.expandedShelfContentsRenderer?.items?.map(vid=>{
+                return {
+                    id:vid?.videoRenderer?.videoId,
+                    title:vid?.videoRenderer?.title?.accessibility?.accessibilityData?.label,
+                    thumbnail:vid?.videoRenderer?.thumbnail?.thumbnails?.length ? vid?.videoRenderer?.thumbnail?.thumbnails[vid?.videoRenderer?.thumbnail?.thumbnails?.length-1] : null,
+                    duration:formatTime(vid?.videoRenderer?.lengthText?.simpleText),
+                    channel:{
+                        name:vid?.videoRenderer?.ownerText?.runs?.[0]?.text,
+                        url:vid?.videoRenderer?.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url
+                    }
+                }
+            })
+            cacheTrend=rec;
+            return rec
+        }
+    }else{
+        reply.send(cacheTrend)
+    }
 })
 
 fastify.ready(err => {
@@ -129,6 +164,10 @@ fastify.ready(err => {
         socket.on("user-set-name", ({username})=>{
             let roomId = checkRoom();
             if(roomId){
+                if(rooms[roomId].die) {
+                    clearTimeout(rooms[roomId].die)
+                    delete rooms[roomId].die
+                };
                 rooms[roomId].users.forEach((obj, index)=>{
                     if(obj.id==socket.id) rooms[roomId].users[index].username=username;
                 })
@@ -171,11 +210,17 @@ fastify.ready(err => {
             let roomId = checkRoom();
             if(roomId){
                 if(rooms[roomId].playlist.length>index){
-                    rooms[roomId].now={
-                        index,
-                        meta:null
-                    };
-                    fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
+                    let find = rooms[roomId].users.find(({id})=>id==socket.id)
+                    if(find&&find.perms>0){
+                        rooms[roomId].now={
+                            index,
+                            meta:null
+                        };
+                        fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
+                    }else{
+                        socket.emit("error", {message:"У вас нет прав"})
+                    }
+                    
                 }else{
                     socket.emit("error", {message:"ID выходит за границы"})
                 }
@@ -237,7 +282,7 @@ fastify.ready(err => {
                     rooms[roomId].users.push({
                         id:socket.id,
                         username:username?username:"User",
-                        perms:rooms[roomId].users.length ? 0 : perms.length-1
+                        perms:rooms[roomId].users.length ? 0 : 2
                     })
                     socket.join(roomId)
                     if(rooms[roomId].now.meta) setTimeout(()=>{
@@ -256,12 +301,20 @@ fastify.ready(err => {
             let roomId = checkRoom();
             if(roomId){
                 rooms[roomId].users.forEach((obj, index)=>{
-                    if(obj.id==socket.id) rooms[roomId].users.splice(index, 1);
+                    if(obj.id==socket.id) {
+                        if(obj.perms==2) isAdmin=true;
+                        rooms[roomId].users.splice(index, 1)
+                    };
                 })
                 if(rooms[roomId].users.length==0) {
-                    delete rooms[roomId];
+                    rooms[roomId].die=setTimeout(()=>{
+                        delete rooms[roomId];
+                    },1000*60*5)
                 }else{
-                    rooms[roomId].users[0].perms=perms.length-1
+                    if(isAdmin) setTimeout(()=>{
+                        rooms[roomId].users[0].perms=2
+                        fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
+                    },2000)
                 }
                 socket.leave(roomId)
                 fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
@@ -281,7 +334,7 @@ setInterval(()=>{
                 if(rooms[roomId].users.length==0) {
                     delete rooms[roomId];
                 }else{
-                    rooms[roomId].users[0].perms=perms.length-1
+                    rooms[roomId].users[0].perms=2
                 }
                 fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
             }

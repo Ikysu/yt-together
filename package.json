@@ -16,6 +16,7 @@
     "fastify-socket.io": "^4.0.0",
     "md5": "^2.3.0",
     "nanoid": "^4.0.0",
+    "node-fetch": "^3.2.10",
     "socket.io": "^4.5.2",
     "youtube-dl-exec": "^2.1.6"
   }
