@@ -118,20 +118,22 @@ fastify.get("/trending", async (req, reply)=>{
         let parse = body.toString().match(/ytInitialData.+{.+;<\/script>/gm);
         if(parse){
             let j = JSON.parse(parse[0].slice(16,parse[0].length-10));
-            let rec = j?.contents?.twoColumnBrowseResultsRenderer?.tabs?.[2]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.shelfRenderer?.content?.expandedShelfContentsRenderer?.items?.map(vid=>{
+            let rec = j?.contents?.twoColumnBrowseResultsRenderer?.tabs[0]?.tabRenderer?.content?.sectionListRenderer?.contents[0]?.itemSectionRenderer?.contents[0]?.shelfRenderer?.content?.expandedShelfContentsRenderer?.items?.map(vid=>{
                 return {
                     id:vid?.videoRenderer?.videoId,
                     title:vid?.videoRenderer?.title?.accessibility?.accessibilityData?.label,
                     thumbnail:vid?.videoRenderer?.thumbnail?.thumbnails?.length ? vid?.videoRenderer?.thumbnail?.thumbnails[vid?.videoRenderer?.thumbnail?.thumbnails?.length-1] : null,
                     duration:formatTime(vid?.videoRenderer?.lengthText?.simpleText),
                     channel:{
-                        name:vid?.videoRenderer?.ownerText?.runs?.[0]?.text,
-                        url:vid?.videoRenderer?.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url
+                        name:vid?.videoRenderer?.ownerText?.runs[0]?.text,
+                        url:vid?.videoRenderer?.ownerText?.runs[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url
                     }
                 }
             })
-            cacheTrend=rec;
-            return rec
+            if(rec){
+                cacheTrend=rec;
+            }
+            reply.send(cacheTrend)
         }
     }else{
         reply.send(cacheTrend)
