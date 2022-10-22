@@ -4,7 +4,7 @@
   "description": "",
   "main": "ytt.js",
   "scripts": {
-    "dev": "node ytt.js"
+    "bg": "node ytt.js&"
   },
   "type": "module",
   "keywords": [],

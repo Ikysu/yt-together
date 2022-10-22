@@ -114,6 +114,10 @@ let cacheTrend = {
     time:0
 };
 
+let waitAMinute = [
+    
+]
+
 fastify.get("/trending", async (req, reply)=>{
     if((+new Date())-cacheTrend.time>60*60*1000){
         let res = await fetch("https://www.youtube.com/feed/trending");
@@ -194,15 +198,23 @@ fastify.ready(err => {
 
         // Плейлист
         socket.on("playlist-add", async ({videoId})=>{
-            let roomId = checkRoom();
-            if(roomId){
-                let res = await getVideo(videoId);
-                if(res.error){
-                    socket.emit("error", {message:res.error})
-                }else{
-                    rooms[roomId].playlist.push(res)
-                    fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
+            if(waitAMinute.indexOf(socket.id)==-1){
+                waitAMinute.push(socket.id);
+                let roomId = checkRoom();
+                if(roomId){
+                    let res = await getVideo(videoId);
+                    if(res.error){
+                        socket.emit("error", {message:res.error})
+                    }else{
+                        rooms[roomId].playlist.push(res)
+                        fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
+                    }
+                    setTimeout(()=>{
+                        waitAMinute.splice(waitAMinute.indexOf(socket.id), 1);
+                    },2000)
                 }
+            }else{
+                socket.emit("error", {message:"Wait a minute"})
             }
         })
 
