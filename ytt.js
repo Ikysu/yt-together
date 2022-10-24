@@ -2,53 +2,23 @@ import Fastify from 'fastify';
 import socketioServer from 'fastify-socket.io';
 import fastifyCors from '@fastify/cors';
 import {nanoid} from 'nanoid';
-import md5 from 'md5';
-import youtubedl from 'youtube-dl-exec';
-import fs from 'fs';
 import fetch from 'node-fetch'
-
-function formatTime(time) {
-    if(!time) return 0;
-    let spl = time.split(":"),
-        sum = 0;
-    for(let i=spl.length-1;i>=0;i--){
-        sum+=spl[i]*Math.pow(60, i)
-    }
-    return sum
-}
-
-function getVideo(id) {
-    return new Promise((resolve, reject)=>{
-        youtubedl('https://www.youtube.com/watch?v='+id, {
-            dumpSingleJson: true,
-            noCheckCertificates: true,
-            noWarnings: true,
-            preferFreeFormats: true,
-            addHeader: [
-                'referer:youtube.com',
-                'user-agent:googlebot'
-            ]
-        }).then(({id, title, formats, thumbnail, channel, channel_url, duration})=>{
-            let frms = []
-            formats.forEach(({vcodec, acodec, width, height, url})=>{
-                if(vcodec!="none"&&acodec!="none"){
-                    frms.push({width, height, url})
-                }
-            })
-            resolve({id, title, thumbnail, formats:frms, channel:{name:channel, url:channel_url}, duration })
-        }).catch((error)=>{
-            console.log(Object.keys(error))
-            resolve({error:"Video unavailable"})
-        })
-    })
-}
-
+import { formatTime, getVideo, getAudio } from './util.js';
 
 let settings = {
     fastify:{
         host:"0.0.0.0",
         port:1212
     }
+}
+
+let rooms = {},
+    waitAMinute = [],
+    cacheTrend = { data:[], time:0 };
+
+function getToken() {
+    let now = nanoid(6);
+    return rooms[now] ? getToken() : now;
 }
 
 const fastify = Fastify()
@@ -62,38 +32,6 @@ fastify.register(socketioServer, {
         methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     }
 })
-
-let perms = [
-    { // user
-        add_video:true,
-        set_video:false,
-        change_time:false,
-        set_mod:false,
-    },
-    { // mod
-        add_video:true,
-        set_video:true,
-        change_time:true,
-        set_mod:false,
-    },
-    { // owner
-        add_video:true, // add to playlist
-        set_video:true, // set now video
-        change_time:true, // set video time
-        set_mod:true, // set mod perm
-    }
-]
-
-let rooms = {}
-
-function getToken() {
-    let now = nanoid(6);
-    if(rooms[now]){
-        return getToken()
-    }else{
-        return now;
-    }
-}
 
 fastify.get("/room/create", (req, reply)=>{
     let roomId = getToken();
@@ -109,14 +47,9 @@ fastify.get("/room/create", (req, reply)=>{
     reply.send(rooms[roomId])
 })
 
-let cacheTrend = {
-    data:[],
-    time:0
-};
-
-let waitAMinute = [
-    
-]
+fastify.get("/watch", async (req, reply)=>{
+    reply.type("application/json").send(await getAudio(req.query.v))
+})
 
 fastify.get("/trending", async (req, reply)=>{
     if((+new Date())-cacheTrend.time>60*60*1000){
@@ -154,8 +87,11 @@ fastify.get("/trending", async (req, reply)=>{
     }
 })
 
-fastify.ready(err => {
+
+
+fastify.ready(async err => {
     if (err) throw err
+
 
     fastify.io.on('connect', (socket) => {
         console.info('Socket connected!', socket.id);
@@ -174,27 +110,6 @@ fastify.ready(err => {
                 return false
             }
         }
-
-
-        // Пользователь
-        socket.on("user-set-name", ({username})=>{
-            let roomId = checkRoom();
-            if(roomId){
-                if(rooms[roomId].die) {
-                    clearTimeout(rooms[roomId].die)
-                    delete rooms[roomId].die
-                };
-                rooms[roomId].users.forEach((obj, index)=>{
-                    if(obj.id==socket.id) rooms[roomId].users[index].username=username;
-                })
-                fastify.io.sockets.to(roomId).emit("room-info", rooms[roomId])
-            }
-        })
-
-
-
-
-
 
         // Плейлист
         socket.on("playlist-add", async ({videoId})=>{
